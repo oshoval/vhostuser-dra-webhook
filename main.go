@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	metadataPath = "/var/run/kubernetes.io/dra-device-attributes"
-	volumeName   = "groutdra-device-metadata"
+	claimName   = "grout-vhu"
+	requestName = "vhu"
 )
 
 func main() {
@@ -88,37 +88,30 @@ func podPatch(pod *corev1.Pod) []patchOp {
 			break
 		}
 	}
-	if hookIndex == -1 || hasMount(pod.Spec.Containers[hookIndex]) {
+	if hookIndex == -1 || !hasPodClaim(pod.Spec.ResourceClaims) || hasClaim(pod.Spec.Containers[hookIndex]) {
 		return nil
 	}
 
-	patch := make([]patchOp, 0, 2)
-	if !hasVolume(pod.Spec.Volumes) {
-		patch = append(patch, patchOp{Op: "add", Path: "/spec/volumes/-", Value: corev1.Volume{
-			Name: volumeName,
-			VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{
-				Path: metadataPath,
-			}},
-		}})
+	path := "/spec/containers/" + strconv.Itoa(hookIndex) + "/resources/claims"
+	claim := corev1.ResourceClaim{Name: claimName, Request: requestName}
+	if len(pod.Spec.Containers[hookIndex].Resources.Claims) == 0 {
+		return []patchOp{{Op: "add", Path: path, Value: []corev1.ResourceClaim{claim}}}
 	}
-	patch = append(patch, patchOp{Op: "add", Path: "/spec/containers/" + strconv.Itoa(hookIndex) + "/volumeMounts/-", Value: corev1.VolumeMount{
-		Name: volumeName, MountPath: metadataPath, ReadOnly: true,
-	}})
-	return patch
+	return []patchOp{{Op: "add", Path: path + "/-", Value: claim}}
 }
 
-func hasVolume(volumes []corev1.Volume) bool {
-	for _, volume := range volumes {
-		if volume.Name == volumeName {
+func hasPodClaim(claims []corev1.PodResourceClaim) bool {
+	for _, claim := range claims {
+		if claim.Name == claimName {
 			return true
 		}
 	}
 	return false
 }
 
-func hasMount(container corev1.Container) bool {
-	for _, mount := range container.VolumeMounts {
-		if mount.MountPath == metadataPath {
+func hasClaim(container corev1.Container) bool {
+	for _, claim := range container.Resources.Claims {
+		if claim.Name == claimName && claim.Request == requestName {
 			return true
 		}
 	}

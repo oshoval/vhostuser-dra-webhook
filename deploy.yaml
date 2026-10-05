@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: grout-poc-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vhostuser-dra-webhook
+  namespace: grout-poc-system
+spec:
+  selector:
+    app: vhostuser-dra-webhook
+  ports:
+  - name: https
+    port: 443
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vhostuser-dra-webhook
+  namespace: grout-poc-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vhostuser-dra-webhook
+  template:
+    metadata:
+      labels:
+        app: vhostuser-dra-webhook
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: webhook
+        image: quay.io/oshoval/vhostuser-dra-webhook:dev
+        imagePullPolicy: Always
+        args: ["--tls-cert-file=/tls/tls.crt", "--tls-private-key-file=/tls/tls.key"]
+        ports:
+        - name: https
+          containerPort: 8443
+        readinessProbe:
+          httpGet:
+            scheme: HTTPS
+            path: /healthz
+            port: https
+        volumeMounts:
+        - name: tls
+          mountPath: /tls
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          runAsNonRoot: true
+      volumes:
+      - name: tls
+        secret:
+          secretName: vhostuser-dra-webhook-tls
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: vhostuser-dra-hook-sidecar-mount
+webhooks:
+- name: vhostuser-dra-hook-sidecar-mount.grout-poc.io
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  failurePolicy: Ignore
+  timeoutSeconds: 5
+  clientConfig:
+    service:
+      namespace: grout-poc-system
+      name: vhostuser-dra-webhook
+      path: /mutate
+      port: 443
+    caBundle: __CA_BUNDLE__
+  rules:
+  - operations: ["CREATE"]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]
+    scope: "Namespaced"
